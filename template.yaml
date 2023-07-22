@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless patterns - Amazon API Gateway to AWS Lambda to Amazon DynamoDB
+Resources:
+# Custom Authentication 
+  Authorizer:
+    Type: 'AWS::ApiGateway::Authorizer'
+    Properties:
+      Cors:
+        AllowMethods: "'POST'"
+        AllowHeaders: "'Content-Type'"
+        AllowOrigin: "'*'"
+      AuthorizerCredentials: !GetAtt 
+        - LambdaInvocationRole
+        - Arn
+      AuthorizerResultTtlInSeconds: '300'
+      AuthorizerUri: !Join 
+        - ''
+        - - 'arn:aws:apigateway:'
+          - !Ref 'AWS::Region'
+          - ':lambda:path/2015-03-31/functions/'
+          - !GetAtt 
+            - LambdaAuthorizer
+            - Arn
+          - /invocations
+      Type: TOKEN
+      IdentitySource: method.request.header.Auth
+      Name: DefaultAuthorizer
+      RestApiId: !Ref RestApi
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Description: 'Lambda function inserts data into DynamoDB table'
+    Properties:
+      FunctionName: WeatherFunction
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      CodeUri: src/
+      Policies:
+        DynamoDBCrudPolicy:
+          TableName: !Ref DynamoDBTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Authorizer
+            Path: /
+            Method: POST
+  
+  LambdaFunction1:
+    Type: AWS::Serverless::Function
+    Description: 'Lambda function delete data from DynamoDB table'
+    Properties:
+      FunctionName: WeatherFunction
+      Handler: delete.lambda_handler
+      Runtime: python3.7
+      CodeUri: src/
+      Policies:
+        DynamoDBCrudPolicy:
+          TableName: !Ref DynamoDBTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Authorizer
+            Path: /
+            Method: DELETE
+  
+  DynamoDBTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: WeatherData
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      - AttributeName: Weather
+        AttributeType: S
+
+  PythonTestDemo:
+    Type: AWS::Serverless::Function 
+    Properties:
+      Tracing: Active
+      # Available policies: 
+      # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-template-list.html
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DynamoDBTable
+      CodeUri: src/
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME:
+            Ref: DynamoDBTable
+
+Outputs:
+  EndpointUrl:
+    Description: 'HTTP REST endpoint URL'
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
+  PythonTestDemo:
+    Description: "Hello Person Lambda Function ARN"
+    Value: !GetAtt PythonTestDemo.Arn
+  DynamoDBTableName:
+    Description: "Hello Person DynamoDB table name"
+    Value: !Ref DynamoDBTable
